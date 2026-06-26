@@ -1,7 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
 import bcrypt from "bcryptjs";
 import { config } from "./config.js";
+import { connectDatabase } from "./database.js";
+import { AdminModel } from "./models/Admin.js";
 
 export type AdminRecord = {
   username: string;
@@ -10,42 +10,54 @@ export type AdminRecord = {
   updatedAt: string;
 };
 
-const dataFile = resolve(process.cwd(), config.adminDataFile);
-
-async function createDefaultRecord(): Promise<AdminRecord> {
-  return {
-    username: config.adminUsername,
-    passwordHash: await bcrypt.hash(config.adminDefaultPassword, 12),
-    mustChangePassword: true,
-    updatedAt: new Date().toISOString(),
-  };
+async function ensureConnected() {
+  await connectDatabase();
 }
 
 export async function getAdminRecord(): Promise<AdminRecord> {
-  try {
-    const raw = await readFile(dataFile, "utf8");
-    return JSON.parse(raw) as AdminRecord;
-  } catch (error) {
-    const record = await createDefaultRecord();
-    await saveAdminRecord(record);
-    return record;
+  await ensureConnected();
+
+  let doc = await AdminModel.findOne({ username: config.adminUsername });
+
+  if (!doc) {
+    const passwordHash = await bcrypt.hash(config.adminDefaultPassword, 12);
+    doc = await AdminModel.create({
+      username: config.adminUsername,
+      passwordHash,
+      mustChangePassword: true,
+    });
   }
+
+  return {
+    username: doc.username,
+    passwordHash: doc.passwordHash,
+    mustChangePassword: doc.mustChangePassword,
+    updatedAt: (doc.updatedAt as Date).toISOString(),
+  };
 }
 
-export async function saveAdminRecord(record: AdminRecord): Promise<void> {
-  await mkdir(dirname(dataFile), { recursive: true });
-  await writeFile(dataFile, JSON.stringify(record, null, 2), "utf8");
+export async function saveAdminRecord(record: Omit<AdminRecord, "updatedAt">): Promise<AdminRecord> {
+  await ensureConnected();
+
+  const doc = await AdminModel.findOneAndUpdate(
+    { username: record.username },
+    { passwordHash: record.passwordHash, mustChangePassword: record.mustChangePassword },
+    { new: true, upsert: true },
+  );
+
+  return {
+    username: doc!.username,
+    passwordHash: doc!.passwordHash,
+    mustChangePassword: doc!.mustChangePassword,
+    updatedAt: (doc!.updatedAt as Date).toISOString(),
+  };
 }
 
 export async function updateAdminPassword(newPassword: string): Promise<AdminRecord> {
   const record = await getAdminRecord();
-  const nextRecord: AdminRecord = {
-    ...record,
+  return saveAdminRecord({
+    username: record.username,
     passwordHash: await bcrypt.hash(newPassword, 12),
     mustChangePassword: false,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await saveAdminRecord(nextRecord);
-  return nextRecord;
+  });
 }

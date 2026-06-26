@@ -20,5 +20,4 @@ export const config = {
   jwtSecret:
     process.env.JWT_SECRET ?? "dev-only-change-this-admin-jwt-secret-value",
   adminFeOrigin: process.env.ADMIN_FE_ORIGIN ?? "http://localhost:3001",
-  adminDataFile: process.env.ADMIN_DATA_FILE ?? "./data/admin-auth.json",
 };
